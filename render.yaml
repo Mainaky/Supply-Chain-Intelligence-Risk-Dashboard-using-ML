@@ -1,9 +1,8 @@
 services:
-  # ── Backend: FastAPI ML & Auth Service ─────────────────────────────────────
   - type: web
     name: supply-chain-api
     runtime: python
-    plan: free
+    plan: starter
     region: singapore
     branch: main
     buildCommand: pip install -r requirements-common.txt -r requirements-api.txt
@@ -13,16 +12,17 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.10
-      - key: API_SHARED_TOKEN
-        generateValue: true
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: supply-chain-users
+          property: connectionString
 
-  # ── Frontend: Streamlit Interactive UI ──────────────────────────────────────
   - type: web
     name: supply-chain-dashboard
     runtime: python
-    plan: free
+    plan: starter
     region: singapore
     branch: main
     buildCommand: pip install -r requirements-common.txt -r requirements-dashboard.txt
@@ -32,10 +32,20 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.10
-      - key: API_BASE_URL
-        value: https://supply-chain-api.onrender.com
-      - key: API_SHARED_TOKEN
+      - key: API_HOST
         fromService:
           name: supply-chain-api
           type: web
-          envVarKey: API_SHARED_TOKEN
+          property: host
+      - key: API_PORT
+        fromService:
+          name: supply-chain-api
+          type: web
+          property: port
+
+databases:
+  - name: supply-chain-users
+    plan: 0.1c-256mb
+    region: singapore
+    databaseName: supply_chain_users
+    user: supply_chain_app

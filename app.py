@@ -352,6 +352,27 @@ def main():
     if not st.session_state["authenticated"]:
         render_auth_page()
     else:
+        token = st.session_state.get("auth_token")
+        try:
+            response = requests.get(
+                f"{BASE_URL}/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=(30, 10),
+            )
+        except requests.RequestException:
+            st.error("Could not verify your sign-in session. Please retry shortly.")
+            st.stop()
+        if response.status_code == 401:
+            st.session_state["authenticated"] = False
+            st.session_state["auth_token"] = None
+            st.session_state["user_info"] = {}
+            st.info("Your session expired. Please sign in again.")
+            render_auth_page()
+            return
+        if not response.ok:
+            st.error("Could not verify your sign-in session.")
+            st.stop()
+        st.session_state["user_info"]["username"] = response.json()["username"]
         render_dashboard()
 
 

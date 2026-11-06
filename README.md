@@ -1,139 +1,119 @@
-# Supply Chain Intelligence & Risk Management Platform
+# Supply Chain Intelligence & Risk Dashboard
 
-An enterprise-grade, full-stack predictive supply chain analytics application. Featuring a modern **Streamlit frontend** with complete user authentication (Sign Up / Sign In / Demo access) and a high-performance **FastAPI microservice backend** powering real-time delivery performance analytics and Random Forest delay risk inference.
+A two-service supply-chain analytics application. The Streamlit dashboard provides the user interface; a FastAPI backend serves historical summaries and Random Forest predictions. User accounts use Argon2 password hashes and signed, expiring JWT sessions. Render Postgres stores accounts persistently in deployment.
 
----
-
-## 🏛️ System Architecture
+## Architecture
 
 ```text
-               ┌────────────────────────────────────────────────────────┐
-               │              CLIENT / WEB BROWSER                      │
-               │  Streamlit UI (Port 8501 / Render Web Service)         │
-               └──────────────────────────┬─────────────────────────────┘
-                                          │
-                  HTTPS Requests / Bearer JWT Authentication
-                                          │
-                                          ▼
-               ┌────────────────────────────────────────────────────────┐
-               │              BACKEND REST MICROSERVICE                 │
-               │  FastAPI (Port 8000 / Render Web Service)              │
-               ├──────────────────────────┬─────────────────────────────┤
-               │  • /api/v1/auth/signup   │  • /api/v1/dashboard        │
-               │  • /api/v1/auth/login    │  • /api/v1/predict          │
-               │  • /api/v1/auth/me       │  • /health & /docs          │
-               └─────────────┬────────────────────────────┬─────────────┘
-                             │                            │
-                             ▼                            ▼
-               ┌──────────────────────────┐  ┌──────────────────────────┐
-               │    SQLITE AUTH STORE     │  │   MACHINE LEARNING ENGINE│
-               │   Data/users.db (PBKDF2) │  │   Random Forest Classifier│
-               │   Salted Passwords & JWT │  │   DataCo (180,516 records)│
-               └──────────────────────────┘  └──────────────────────────┘
+Browser
+  └── Streamlit dashboard
+        ├── signup/sign-in ──> FastAPI authentication endpoints
+        ├── dashboard data ──> FastAPI analytics endpoint
+        └── delay estimate ──> FastAPI prediction endpoint
+                                  ├── cleaned CSV data
+                                  ├── saved Random Forest model
+                                  └── Render Postgres user store
 ```
 
----
+The Streamlit server calls the API over Render's private network. The browser does not call the model API directly. The API requires a signed bearer token for dashboard and prediction routes. Health checks are available at `/health`; interactive API docs are enabled locally and disabled on Render.
 
-## 🌟 Key Features
+## What it shows
 
-1. **Enterprise User Authentication:**
-   - **User Sign-Up:** Secure registration with email validation and PBKDF2-HMAC-SHA256 salted password hashing.
-   - **User Login:** Issues tamper-evident signed JWT bearer tokens with 7-day expiration.
-   - **1-Click Recruiter Demo:** Instant guest review access without manual form entry.
-   - **Persistent SQLite Database:** Auto-initialized user storage with zero external database setup required.
-2. **Executive KPI Dashboard:**
-   - On-time delivery rate, total revenue exposure ($36.7M), unique order counts, and schedule gap days.
-3. **Delivery Performance Analytics:**
-   - On-time delivery comparisons across shipping modes (First Class, Second Class, Standard, Same Day).
-   - Regional risk segmentation (Sales Exposure vs. Reliability) with K-Means risk clustering.
-4. **Real-Time ML Delay Predictor:**
-   - Real-time scoring using a 78-feature Random Forest model trained on the DataCo Supply Chain dataset.
-   - Returns continuous late probability percentage and actionable operational mitigation strategies.
-5. **Render Cloud Deployment Ready:**
-   - Multi-service `render.yaml` blueprint with automated dependency installation, health checks, and cross-service communication.
+- On-time delivery rate, total sales, unique orders, and average difference between actual and scheduled shipping days.
+- On-time performance by shipping mode and regional risk segments compared with sales exposure.
+- Order-level classification of the historical `Late_delivery_risk` target as 0 or 1, with the model's probability estimate.
+- Account creation, sign-in, sign-out, and 30-minute signed access tokens.
 
----
+The included data contains 180,516 order-item rows and 65,749 distinct order IDs. It is historical DataCo data, not a live order feed. The classifier estimates a supplied historical label; it does not predict exactly how many days late an order will be. Its probability is not documented as calibrated.
 
-## 🚀 Local Quickstart
+## Run locally
 
-### 1. Prerequisites
-- Python 3.11.x installed.
+Use Python 3.11.10. Create a virtual environment and install all dependencies:
 
-### 2. Setup Virtual Environment
-```bash
+```powershell
 python -m venv .venv
-
-# Windows PowerShell:
 .venv\Scripts\Activate.ps1
-
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install --upgrade pip
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+$env:JWT_SECRET_KEY = python -c "import secrets; print(secrets.token_hex(32))"
+$env:LOCAL_AUTH_DB_PATH = "$PWD\Data\auth_local.db"
 ```
 
-### 3. Start Backend (Terminal 1)
-```powershell
-uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
-```
-* Interactive API Documentation (Swagger): `http://127.0.0.1:8000/docs`
-* Health Endpoint: `http://127.0.0.1:8000/health`
+Start the API in terminal 1:
 
-### 4. Start Frontend (Terminal 2)
 ```powershell
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+Start the dashboard in terminal 2:
+
+```powershell
+$env:API_HOST = "127.0.0.1"
+$env:API_PORT = "8000"
 streamlit run app.py
 ```
-* Dashboard will automatically open at `http://localhost:8501`.
 
----
+Open `http://localhost:8501`. Local accounts use SQLite at the ignored `Data/auth_local.db`; when running on Render, the API requires `DATABASE_URL` and uses managed Postgres instead. Do not reuse a production JWT secret locally or commit one to Git.
 
-## ☁️ Deploying to Render
+## API routes
 
-This repository includes a pre-configured `render.yaml` Blueprint.
+- `POST /api/v1/auth/signup` — create a username/email account; passwords must be at least 12 characters.
+- `POST /api/v1/auth/login` — verify username or email and password; returns a signed JWT with a 30-minute expiry.
+- `GET /api/v1/auth/me` — verify the current token and return its user identity.
+- `GET /api/v1/dashboard` — KPIs, shipping-mode performance, regional data, and allowed prediction categories.
+- `POST /api/v1/predict` — validate user inputs and return the classifier's class and late-risk probability.
 
-### Option A: 1-Click Render Blueprint (Recommended)
-1. Push this repository to your **GitHub** account.
-2. Log into [Render](https://render.com).
-3. Click **New +** $\rightarrow$ **Blueprint**.
-4. Connect your GitHub repository.
-5. Render will automatically detect `render.yaml` and provision both:
-   - `supply-chain-api` (FastAPI backend)
-   - `supply-chain-dashboard` (Streamlit UI)
-6. Once deployed, open the public URL of `supply-chain-dashboard` in your browser!
+## Deploy on Render
 
-### Option B: Deploying Manually on Render (Free Tier)
+[`render.yaml`](render.yaml) defines two Starter web services in Singapore plus a paid Postgres database:
 
-#### 1. Deploy the API:
-- **Service Type:** Web Service
-- **Runtime:** Python 3
-- **Build Command:** `pip install -r requirements-common.txt -r requirements-api.txt`
-- **Start Command:** `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-- **Health Check Path:** `/health`
-- **Environment Variables:**
-  - `PYTHON_VERSION`: `3.11.10`
-  - `API_SHARED_TOKEN`: *(click generate or enter any secret key)*
-  - `JWT_SECRET_KEY`: *(click generate or enter any secret key)*
+1. `supply-chain-api` runs FastAPI, generates a JWT signing secret, and connects to Postgres.
+2. `supply-chain-dashboard` runs Streamlit and receives the API's private hostname and port from Render.
+3. `supply-chain-users` stores account records using a managed database connection string.
 
-#### 2. Deploy the Dashboard:
-- **Service Type:** Web Service
-- **Runtime:** Python 3
-- **Build Command:** `pip install -r requirements-common.txt -r requirements-dashboard.txt`
-- **Start Command:** `streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true`
-- **Health Check Path:** `/_stcore/health`
-- **Environment Variables:**
-  - `PYTHON_VERSION`: `3.11.10`
-  - `API_BASE_URL`: `https://<YOUR-API-SERVICE-NAME>.onrender.com`
-  - `API_SHARED_TOKEN`: *(same token value as API)*
+To deploy, connect the GitHub repository to **New → Blueprint** in Render, inspect the service/database plans and current charges, then apply the Blueprint. Render's free Postgres databases expire after 30 days and do not provide backups, so the Blueprint uses a paid persistent database. Review the costs in Render before applying; no Render service has been created by this repository change. Render Blueprints accept service/database references and health-check paths as configured here ([Blueprint reference](https://render.com/docs/blueprint-spec), [Postgres connections](https://render.com/docs/postgresql-creating-connecting)).
 
-> **Note on Render Free Tier Cold Starts:**  
-> Free instances spin down after 15 minutes of inactivity. When accessed after idle, the service takes 30–50 seconds to wake up. The UI features friendly loading state detection and automated retry triggers.
+## Important files
 
----
+```text
+backend/main.py              FastAPI routes, validation, model loading, prediction
+backend/auth.py              Argon2 password hashing, JWT issue/verification, DB access
+app.py                       Streamlit UI and account/session handling
+Data/cleaned_data.csv        Cleaned historical order rows
+Data/region_clusters.csv     Regional summaries and precomputed cluster IDs
+models/rf_delay_model.pkl    Saved Random Forest classifier
+models/model_columns.pkl     Ordered classifier feature schema
+models/prophet_model.pkl     Forecast artifact; not used in the running app
+models/kmeans_model (1).pkl  Clustering artifact; cluster results are precomputed
+models/scaler.pkl            Scaler artifact; not used in the running app
+requirements*.txt             Pinned API, dashboard, and common dependencies
+render.yaml                  Render services, Postgres, secrets, and health checks
+.python-version              Python runtime version
+.streamlit/config.toml       Streamlit server settings
+```
 
-## 📊 Dataset & Model Details
+## Model and data limitations
 
-- **Dataset:** DataCo Smart Supply Chain Dataset (180,516 orders, 65,749 distinct order transactions).
-- **Target Variable:** `Late_delivery_risk` (Binary: 0 = On-Time, 1 = Late).
-- **Model Architecture:** Random Forest Classifier serialized with `scikit-learn==1.6.1`.
-- **Validation Score:** 0.73 ROC-AUC on historical test holdout.
+- The source is the [DataCo Smart Supply Chain dataset on Kaggle](https://www.kaggle.com/datasets/shashwatwork/dataco-smart-supply-chain-for-big-data-analysis). The repository includes a reduced historical extract, not the raw dataset or live operational data.
+- The training notebooks/scripts and data-splitting/evaluation process are absent. The README's reported 0.73 ROC-AUC and 8.13% Prophet MAPE cannot be reproduced from the repository alone.
+- Prophet and SHAP are not used by the running dashboard. The app does not render a demand forecast or feature explanation.
+- User accounts are stored persistently in Render Postgres; a new deployment does not silently fall back to an ephemeral local database.
+
+## Security and production boundary
+
+This version uses Argon2 password hashing, a required random JWT secret, issuer/audience/expiry/signature checks, input validation, and persistent Postgres on Render. Sign-up does not verify email ownership; there is no password reset, MFA, account administration, or formal distributed rate limiting. Add those controls and independent security review before using this as an operational system with real employees or sensitive data. The model itself is also not validated for current operational decisions.
+
+## Screenshots
+
+### Dashboard overview
+![Dashboard overview](screenshots/dashboard_overview.png)
+
+### Delivery performance
+![Delivery analysis](screenshots/delivery_analysis.png)
+
+### Delay risk predictor
+![Delay predictor](screenshots/delay_predictor_1.png)
+
+## Author
+
+Vinayak Nair
