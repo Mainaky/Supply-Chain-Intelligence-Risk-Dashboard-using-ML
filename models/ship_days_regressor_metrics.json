@@ -1,0 +1,22 @@
+{
+  "target": "Days for shipping (real)",
+  "model": "RandomForestRegressor",
+  "split": "80/20 grouped by Order Id; random_state=42",
+  "rows_used": 180516,
+  "train_rows": 144628,
+  "test_rows": 35888,
+  "train_orders": 52599,
+  "test_orders": 13150,
+  "mae_days": 0.9752084027145054,
+  "rmse_days": 1.2599689262387697,
+  "r2": 0.40253985107660806,
+  "feature_columns": [
+    "Shipping Mode",
+    "Order Region",
+    "Category Name",
+    "Days for shipment (scheduled)",
+    "Order Item Quantity",
+    "Sales",
+    "Order Item Discount Rate"
+  ]
+}

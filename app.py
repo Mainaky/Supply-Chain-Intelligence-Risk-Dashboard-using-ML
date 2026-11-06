@@ -91,6 +91,7 @@ def logout():
     st.session_state["authenticated"] = False
     st.session_state["auth_token"] = None
     st.session_state["user_info"] = {}
+    st.session_state.pop("last_risk_prediction", None)
     st.rerun()
 
 
@@ -137,6 +138,7 @@ def render_auth_page():
                                         "email": data.get("email", ""),
                                         "role": data.get("role", "Supply Chain Analyst"),
                                     }
+                                    st.session_state["workspace_navigation"] = "New shipment assessment"
                                     st.rerun()
                                 else:
                                     st.error("Login failed. Check your username/email and password.")
@@ -176,6 +178,7 @@ def render_auth_page():
                                     "email": "",
                                     "role": data.get("role", "Supply Chain Analyst"),
                                 }
+                                st.session_state["workspace_navigation"] = "New shipment assessment"
                                 st.rerun()
                             else:
                                 err_msg = resp.json().get("detail", "Signup could not be completed.")
@@ -215,7 +218,7 @@ def render_sidebar(username: str, role: str) -> str:
         st.markdown("<span class='brand-sub'>WORKSPACE</span>", unsafe_allow_html=True)
         page = st.radio(
             "Workspace navigation",
-            ["Executive overview", "Delivery performance", "Regional intelligence", "Risk predictor"],
+            ["New shipment assessment", "Executive overview", "Delivery performance", "Regional intelligence"],
             label_visibility="collapsed",
             key="workspace_navigation",
         )
@@ -228,7 +231,7 @@ def render_sidebar(username: str, role: str) -> str:
         st.caption(role)
         if st.button("Sign out", use_container_width=True):
             logout()
-        st.caption("Historical DataCo orders · Random Forest classifier")
+        st.caption("Historical DataCo orders · classification + duration models")
     return page
 
 
@@ -362,59 +365,93 @@ def render_regions_page(dashboard: dict) -> None:
 
 def render_predictor_page(dashboard: dict, token: str) -> None:
     render_hero(
-        "MACHINE-LEARNING WORKBENCH",
-        "Shipment risk predictor",
-        "Submit an order profile to estimate its historical late-delivery risk using the saved Random Forest model.",
+        "NEW SHIPMENT · CLASSIFICATION + REGRESSION",
+        "Shipment assessment",
+        "Enter the person requesting the assessment and the order profile. The system returns a late-risk class and an estimated shipping duration.",
     )
     categories = dashboard["categories"]
     with st.form("risk_prediction_form", border=True):
-        st.markdown("<div class='section-title'>Order profile</div><div class='section-copy'>Choose the shipment and commercial attributes to score.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Assessment details</div><div class='section-copy'>The requester name labels this assessment. It is not used as a model feature.</div>", unsafe_allow_html=True)
+        requester_name = st.text_input(
+            "Person requesting this assessment",
+            placeholder="Enter the analyst or planner's name",
+            max_chars=80,
+            key="prediction_requester_name",
+        )
+        st.markdown("<div class='section-title'>Order profile</div><div class='section-copy'>Enter values within the ranges represented in the historical training data.</div>", unsafe_allow_html=True)
         col_a, col_b, col_c = st.columns(3)
         shipping_mode = col_a.selectbox("Shipping mode", categories["shipping_mode"], key="predict_shipping")
         order_region = col_a.selectbox("Destination region", categories["order_region"], key="predict_region")
         category = col_b.selectbox("Product category", categories["category"], key="predict_category")
-        scheduled_days = col_b.slider("Scheduled transit days", 0, 5, 2, key="predict_schedule")
-        quantity = col_c.number_input("Item quantity", min_value=1, max_value=20, value=1, key="predict_quantity")
-        sales_amount = col_c.number_input("Order sales value ($)", min_value=5.0, max_value=50000.0, value=250.0, step=25.0, key="predict_sales")
-        discount = st.slider("Applied discount rate", 0.0, 0.5, 0.1, step=0.01, key="predict_discount")
-        submitted = st.form_submit_button("Estimate shipment risk", type="primary", use_container_width=True)
+        scheduled_options = dashboard["scheduled_day_options"]
+        default_schedule_index = scheduled_options.index(4) if 4 in scheduled_options else 0
+        scheduled_days = col_b.selectbox("Scheduled shipping days", scheduled_options, index=default_schedule_index, key="predict_schedule")
+        quantity = col_c.number_input("Item quantity", min_value=1, max_value=5, value=1, key="predict_quantity")
+        sales_amount = col_c.number_input("Sales value ($)", min_value=10.0, max_value=2000.0, value=250.0, step=10.0, key="predict_sales")
+        discount = st.slider("Item discount rate", 0.0, 0.25, 0.1, step=0.01, key="predict_discount")
+        submitted = st.form_submit_button("Run classification + duration estimate", type="primary", use_container_width=True)
 
     if submitted:
-        payload = {
-            "shipping_mode": shipping_mode,
-            "order_region": order_region,
-            "category": category,
-            "scheduled_days": int(scheduled_days),
-            "quantity": int(quantity),
-            "sales": float(sales_amount),
-            "discount_rate": float(discount),
-        }
-        try:
-            with st.spinner("Scoring order profile…"):
-                response = requests.post(
-                    f"{BASE_URL}/api/v1/predict",
-                    json=payload,
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=(30, 30),
-                )
-            response.raise_for_status()
-            st.session_state["last_risk_prediction"] = response.json()
-        except requests.RequestException:
+        if not requester_name.strip():
+            st.error("Enter the person requesting this assessment before running the models.")
             st.session_state.pop("last_risk_prediction", None)
-            st.error("The prediction service could not complete this request. Please try again.")
+        else:
+            payload = {
+                "shipping_mode": shipping_mode,
+                "order_region": order_region,
+                "category": category,
+                "scheduled_days": int(scheduled_days),
+                "quantity": int(quantity),
+                "sales": float(sales_amount),
+                "discount_rate": float(discount),
+            }
+            try:
+                with st.spinner("Running the classification and duration models…"):
+                    response = requests.post(
+                        f"{BASE_URL}/api/v1/predict",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=(30, 30),
+                    )
+                response.raise_for_status()
+                st.session_state["last_risk_prediction"] = {
+                    **response.json(),
+                    "requester_name": requester_name.strip(),
+                }
+            except requests.RequestException as exc:
+                st.session_state.pop("last_risk_prediction", None)
+                detail = "The prediction service could not complete this request. Please try again."
+                if getattr(exc, "response", None) is not None and exc.response is not None:
+                    try:
+                        detail = exc.response.json().get("detail", detail)
+                    except ValueError:
+                        pass
+                st.error(detail)
 
     result = st.session_state.get("last_risk_prediction")
     if result:
-        st.markdown("<div class='section-title'>Model estimate</div>", unsafe_allow_html=True)
-        result_col, explanation_col = st.columns([1, 2])
-        with result_col:
-            st.metric("Estimated late-delivery probability", f"{result['late_probability']:.1%}")
-        with explanation_col:
-            if result["prediction"] == 1:
-                st.error("**Higher historical risk** · The model classified this profile as more likely to exceed the scheduled shipping time.")
-            else:
-                st.success("**Lower historical risk** · The model classified this profile as less likely to exceed the scheduled shipping time.")
-        st.caption(f"{result['model']} · {result['caveat']}")
+        st.markdown("<div class='section-title'>Assessment result</div>", unsafe_allow_html=True)
+        st.write(f"Prepared for **{result['requester_name']}**")
+        cols = st.columns(4)
+        class_text = "Class 1 · Higher risk" if result["prediction"] == 1 else "Class 0 · Lower risk"
+        cols[0].metric("Late-delivery class", class_text)
+        cols[1].metric("Late-risk probability", f"{result['late_probability']:.1%}")
+        cols[2].metric("Estimated shipping duration", f"{result['estimated_shipping_days']:.1f} days")
+        cols[3].metric("Vs. scheduled days", f"{result['schedule_variance_days']:+.1f} days")
+        if result["prediction"] == 1:
+            st.warning("The classifier assigned **Class 1**: the historical `Late_delivery_risk` target is flagged.")
+        else:
+            st.success("The classifier assigned **Class 0**: the historical `Late_delivery_risk` target is not flagged.")
+        st.info(
+            f"Stored destination risk segment: **{result['regional_risk_segment']}**. "
+            "This four-segment regional profile comes from the project's precomputed region clustering; it is separate from the per-order binary classifier."
+        )
+        st.caption(
+            f"Classification: {result['classification_model']} · Regression: {result['regression_model']} · "
+            f"Grouped holdout MAE: {result['regression_holdout_mae_days']:.2f} days. "
+            "The regression value estimates actual shipping duration; the signed schedule difference compares it with the promise. "
+            "The class and duration models can disagree; the probability is not calibrated and neither output is an operational guarantee."
+        )
 
 
 def render_dashboard() -> None:
@@ -435,10 +472,10 @@ def render_dashboard() -> None:
         st.stop()
 
     pages = {
+        "New shipment assessment": lambda: render_predictor_page(dashboard, token),
         "Executive overview": lambda: render_overview(dashboard),
         "Delivery performance": lambda: render_delivery_page(dashboard),
         "Regional intelligence": lambda: render_regions_page(dashboard),
-        "Risk predictor": lambda: render_predictor_page(dashboard, token),
     }
     pages[page]()
 

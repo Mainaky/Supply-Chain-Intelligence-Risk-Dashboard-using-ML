@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -47,17 +48,28 @@ class PredictionRequest(BaseModel):
     shipping_mode: str = Field(min_length=1, max_length=80)
     order_region: str = Field(min_length=1, max_length=100)
     category: str = Field(min_length=1, max_length=100)
-    scheduled_days: int = Field(ge=0, le=30)
-    quantity: int = Field(ge=1, le=100)
-    sales: float = Field(ge=0, le=1_000_000)
-    discount_rate: float = Field(ge=0, le=1)
+    scheduled_days: int = Field(ge=0, le=4)
+    quantity: int = Field(ge=1, le=5)
+    sales: float = Field(ge=10, le=2_000)
+    discount_rate: float = Field(ge=0, le=0.25)
 
 
 class PredictionResponse(BaseModel):
     prediction: Literal[0, 1]
     label: Literal["Lower risk", "Higher risk"]
+    regional_risk_segment: Literal[
+        "Low risk, low volume",
+        "Standard performance",
+        "High-priority risk",
+        "High risk, low volume",
+        "Unclassified",
+    ]
     late_probability: float = Field(ge=0, le=1)
-    model: str
+    estimated_shipping_days: float = Field(ge=0, le=6)
+    schedule_variance_days: float = Field(ge=-4, le=6)
+    regression_holdout_mae_days: float = Field(ge=0)
+    classification_model: str
+    regression_model: str
     caveat: str
 
 
@@ -67,6 +79,9 @@ class Assets:
     regions: pd.DataFrame
     model: object
     model_columns: list[str]
+    duration_model: dict
+    duration_metrics: dict
+    scheduled_day_options: list[int]
     categories: dict[str, list[str]]
     baselines: dict[str, str]
 
@@ -79,6 +94,8 @@ def load_assets() -> Assets:
         "regional summary": DATA_DIR / "region_clusters.csv",
         "classifier": MODEL_DIR / "rf_delay_model.pkl",
         "classifier feature schema": MODEL_DIR / "model_columns.pkl",
+        "duration regressor": MODEL_DIR / "ship_days_regressor.pkl",
+        "duration metrics": MODEL_DIR / "ship_days_regressor_metrics.json",
     }
     missing = [name for name, path in assets_to_check.items() if not path.is_file()]
     if missing:
@@ -88,6 +105,8 @@ def load_assets() -> Assets:
     regions = pd.read_csv(assets_to_check["regional summary"])
     model = joblib.load(assets_to_check["classifier"])
     model_columns = list(joblib.load(assets_to_check["classifier feature schema"]))
+    duration_model = joblib.load(assets_to_check["duration regressor"])
+    duration_metrics = json.loads(assets_to_check["duration metrics"].read_text(encoding="utf-8"))
 
     order_fields = {
         "Late_delivery_risk", "Sales", "Order Id", "Days for shipping (real)",
@@ -112,6 +131,16 @@ def load_assets() -> Assets:
         raise RuntimeError("Classifier is missing the late-risk target class")
     if hasattr(model, "n_jobs"):
         model.n_jobs = 1
+    duration_features = [
+        "Shipping Mode", "Order Region", "Category Name",
+        "Days for shipment (scheduled)", "Order Item Quantity", "Sales",
+        "Order Item Discount Rate",
+    ]
+    if duration_model.get("features") != duration_features or duration_model.get("target") != "Days for shipping (real)":
+        raise RuntimeError("Duration regressor schema does not match its training contract")
+    duration_estimator = duration_model["pipeline"].named_steps["regressor"]
+    if hasattr(duration_estimator, "n_jobs"):
+        duration_estimator.n_jobs = 1
 
     category_definitions = {
         "shipping_mode": ("Shipping Mode", "Shipping Mode_"),
@@ -139,7 +168,20 @@ def load_assets() -> Assets:
     }
     if not required_numeric.issubset(model_columns):
         raise RuntimeError("Classifier feature schema is missing numeric inputs")
-    return Assets(orders, regions, model, model_columns, categories, baselines)
+    scheduled_day_options = sorted(
+        orders["Days for shipment (scheduled)"].dropna().astype(int).unique().tolist()
+    )
+    return Assets(
+        orders=orders,
+        regions=regions,
+        model=model,
+        model_columns=model_columns,
+        duration_model=duration_model,
+        duration_metrics=duration_metrics,
+        scheduled_day_options=scheduled_day_options,
+        categories=categories,
+        baselines=baselines,
+    )
 
 
 async def current_user(
@@ -243,6 +285,7 @@ async def dashboard_data(_: str = Depends(current_user)) -> dict[str, object]:
             for _, row in regions.iterrows()
         ],
         "categories": assets.categories,
+        "scheduled_day_options": assets.scheduled_day_options,
     }
 
 
@@ -260,6 +303,15 @@ async def predict_delay(
     for field, value in selections.items():
         if value not in assets.categories[field]:
             raise HTTPException(status_code=422, detail=f"Unknown {field.replace('_', ' ')}")
+    if request.scheduled_days not in assets.scheduled_day_options:
+        raise HTTPException(status_code=422, detail="Scheduled transit days are outside the training data values")
+    matching_regions = assets.regions.loc[
+        assets.regions["Order Region"].astype(str) == request.order_region,
+        "Cluster",
+    ]
+    if matching_regions.empty:
+        raise HTTPException(status_code=422, detail="No historical risk segment exists for this region")
+    regional_risk_segment = RISK_TIERS.get(int(matching_regions.iloc[0]), "Unclassified")
 
     features = pd.DataFrame(0.0, index=[0], columns=assets.model_columns)
     numeric_values = [request.quantity, request.sales, request.scheduled_days, request.discount_rate]
@@ -284,6 +336,18 @@ async def predict_delay(
         prediction = int(assets.model.predict(features)[0])
         classes = list(assets.model.classes_)
         probability = float(assets.model.predict_proba(features)[0][classes.index(1)])
+        regression_input = pd.DataFrame([{
+            "Shipping Mode": request.shipping_mode,
+            "Order Region": request.order_region,
+            "Category Name": request.category,
+            "Days for shipment (scheduled)": request.scheduled_days,
+            "Order Item Quantity": request.quantity,
+            "Sales": request.sales,
+            "Order Item Discount Rate": request.discount_rate,
+        }])
+        estimated_shipping_days = float(
+            assets.duration_model["pipeline"].predict(regression_input)[0]
+        )
     except Exception as exc:
         LOGGER.exception("Model inference failed for authenticated request")
         raise HTTPException(status_code=500, detail="Prediction could not be completed") from exc
@@ -291,7 +355,15 @@ async def predict_delay(
     return PredictionResponse(
         prediction=prediction,
         label="Higher risk" if prediction else "Lower risk",
+        regional_risk_segment=regional_risk_segment,
         late_probability=probability,
-        model="Random Forest classifier",
-        caveat="This estimate reflects historical patterns and is not a calibrated guarantee.",
+        estimated_shipping_days=estimated_shipping_days,
+        schedule_variance_days=estimated_shipping_days - request.scheduled_days,
+        regression_holdout_mae_days=float(assets.duration_metrics["mae_days"]),
+        classification_model="Random Forest classifier",
+        regression_model="Random Forest regressor",
+        caveat=(
+            "Both values are estimates from historical data. The classifier probability is not calibrated; "
+            f"the duration model's grouped holdout MAE was {assets.duration_metrics['mae_days']:.2f} days."
+        ),
     )
