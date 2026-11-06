@@ -42,9 +42,10 @@ html, body, [class*="css"] { font-family:Inter, ui-sans-serif, system-ui, sans-s
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { color:#dce5f1; }
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] { color:#94a3b8; }
 [data-testid="stSidebar"] hr { border-color:rgba(255,255,255,.12); }
-[data-testid="stMetric"] { background:#fff; padding:1.15rem 1.25rem; border:1px solid #e7edf4; border-radius:16px; box-shadow:0 8px 24px rgba(21,34,56,.035); }
-[data-testid="stMetricLabel"] { color:#718096; font-weight:600; }
-[data-testid="stMetricValue"] { color:#152238; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-weight:750; }
+[data-testid="stMetric"] { box-sizing:border-box; height:100%; min-height:126px; background:#fff; padding:1.15rem 1.25rem; border:1px solid #e7edf4; border-radius:16px; box-shadow:0 8px 24px rgba(21,34,56,.035); }
+[data-testid="stMetricLabel"] { color:#718096; font-weight:600; min-height:2.5em; }
+[data-testid="stMetricValue"] { color:#152238; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-weight:750; font-size:clamp(1.35rem,2.1vw,2rem); line-height:1.15; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; overflow-wrap:anywhere; }
+[data-testid="stMetricValue"] > div, [data-testid="stMetricValue"] p { white-space:normal !important; overflow:visible !important; text-overflow:clip !important; }
 [data-testid="stMetricDelta"] { font-size:.82rem; }
 button[kind="primary"] { background:linear-gradient(100deg,#147d82,#13a89e); border:0; border-radius:10px; }
 [data-testid="stBaseButton-secondary"] { border-radius:10px; }
@@ -433,11 +434,18 @@ def render_predictor_page(dashboard: dict, token: str) -> None:
         st.markdown("<div class='section-title'>Assessment result</div>", unsafe_allow_html=True)
         st.write(f"Prepared for **{result['requester_name']}**")
         cols = st.columns(4)
-        class_text = "Class 1 · Higher risk" if result["prediction"] == 1 else "Class 0 · Lower risk"
+        class_text = "Class 1 — Higher risk" if result["prediction"] == 1 else "Class 0 — Lower risk"
+        schedule_difference = float(result["schedule_variance_days"])
+        if schedule_difference > 0.05:
+            schedule_text = f"{schedule_difference:.1f} days later"
+        elif schedule_difference < -0.05:
+            schedule_text = f"{abs(schedule_difference):.1f} days earlier"
+        else:
+            schedule_text = "On schedule"
         cols[0].metric("Late-delivery class", class_text)
         cols[1].metric("Late-risk probability", f"{result['late_probability']:.1%}")
         cols[2].metric("Estimated shipping duration", f"{result['estimated_shipping_days']:.1f} days")
-        cols[3].metric("Vs. scheduled days", f"{result['schedule_variance_days']:+.1f} days")
+        cols[3].metric("Schedule comparison", schedule_text)
         if result["prediction"] == 1:
             st.warning("The classifier assigned **Class 1**: the historical `Late_delivery_risk` target is flagged.")
         else:
@@ -449,7 +457,7 @@ def render_predictor_page(dashboard: dict, token: str) -> None:
         st.caption(
             f"Classification: {result['classification_model']} · Regression: {result['regression_model']} · "
             f"Grouped holdout MAE: {result['regression_holdout_mae_days']:.2f} days. "
-            "The regression value estimates actual shipping duration; the signed schedule difference compares it with the promise. "
+            "The regression value estimates actual shipping duration; the schedule comparison describes it relative to the promised duration. "
             "The class and duration models can disagree; the probability is not calibrated and neither output is an operational guarantee."
         )
 
