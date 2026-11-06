@@ -1,0 +1,41 @@
+services:
+  # ── Backend: FastAPI ML & Auth Service ─────────────────────────────────────
+  - type: web
+    name: supply-chain-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: pip install -r requirements-common.txt -r requirements-api.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.10
+      - key: API_SHARED_TOKEN
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+  # ── Frontend: Streamlit Interactive UI ──────────────────────────────────────
+  - type: web
+    name: supply-chain-dashboard
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: pip install -r requirements-common.txt -r requirements-dashboard.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
+    healthCheckPath: /_stcore/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.10
+      - key: API_BASE_URL
+        value: https://supply-chain-api.onrender.com
+      - key: API_SHARED_TOKEN
+        fromService:
+          name: supply-chain-api
+          type: web
+          envVarKey: API_SHARED_TOKEN

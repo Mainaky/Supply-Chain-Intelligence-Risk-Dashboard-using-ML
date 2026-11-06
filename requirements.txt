@@ -1,7 +1,3 @@
-streamlit
-pandas
-matplotlib
-scikit-learn==1.6.1
-prophet
-shap
-joblib
+-r requirements-common.txt
+-r requirements-api.txt
+-r requirements-dashboard.txt

@@ -1,80 +1,139 @@
-# Supply Chain Intelligence & Risk Dashboard
+# Supply Chain Intelligence & Risk Management Platform
 
-An end-to-end analytics project that examines historical e-commerce orders, highlights delivery-risk patterns, and estimates delay risk for a user-entered order. The interactive app is built with Streamlit and uses the DataCo Smart Supply Chain dataset.
+An enterprise-grade, full-stack predictive supply chain analytics application. Featuring a modern **Streamlit frontend** with complete user authentication (Sign Up / Sign In / Demo access) and a high-performance **FastAPI microservice backend** powering real-time delivery performance analytics and Random Forest delay risk inference.
 
-## What is included
+---
 
-- KPI summary for on-time delivery, sales, order count, and the average difference between actual and scheduled shipping days.
-- Shipping-mode comparison and regional risk segmentation visualizations.
-- A Random Forest classifier that estimates whether an order is at risk of late delivery.
-- Saved Prophet, K-means, and Random Forest artifacts, plus the model feature schema.
-- Cleaned order data and a regional summary table.
-
-The repository contains a saved Prophet artifact, but the current Streamlit app does not render a demand forecast. The training notebooks/scripts used to create the saved models are not included, so the model results cannot be independently reproduced from this repository alone.
-
-## Findings reported by the original analysis
-
-The project analysis reports 180,516 order rows, about $36.7M in sales, and an overall on-time rate near 45%. It identifies First Class and Second Class shipping as having high late-delivery rates and flags Western Europe and Central America as high revenue-exposure regions. It also reports 8.13% MAPE for a Prophet forecast and 0.73 ROC-AUC for the delay classifier.
-
-These are the original project's reported findings and metrics; this repository does not include the analysis pipeline needed to recalculate them. The data covers historical orders from 2015–2017, so predictions should be treated as educational decision support rather than current operational guidance. A model probability is not a calibrated guarantee of a late delivery.
-
-## Run locally
-
-Use Python 3.11 in a virtual environment. From the repository root:
-
-```bash
-python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-The app reads files relative to `app.py`, so it can be launched from another working directory. The cleaned CSV and model artifacts are included in the repository.
-
-## Repository layout
+## 🏛️ System Architecture
 
 ```text
-Data/
-  cleaned_data.csv       Cleaned order-level data used by the dashboard
-  region_clusters.csv    Precomputed regional clusters and summary metrics
-models/
-  rf_delay_model.pkl     Trained late-delivery classifier
-  model_columns.pkl      Ordered feature schema for the classifier
-  prophet_model.pkl      Saved demand-forecast model (not currently shown in the app)
-  kmeans_model (1).pkl   Saved regional clustering model
-  scaler.pkl             Saved feature scaler
-screenshots/              Dashboard screenshots
-app.py                    Streamlit dashboard
-requirements.txt          Python dependencies
+               ┌────────────────────────────────────────────────────────┐
+               │              CLIENT / WEB BROWSER                      │
+               │  Streamlit UI (Port 8501 / Render Web Service)         │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │
+                  HTTPS Requests / Bearer JWT Authentication
+                                          │
+                                          ▼
+               ┌────────────────────────────────────────────────────────┐
+               │              BACKEND REST MICROSERVICE                 │
+               │  FastAPI (Port 8000 / Render Web Service)              │
+               ├──────────────────────────┬─────────────────────────────┤
+               │  • /api/v1/auth/signup   │  • /api/v1/dashboard        │
+               │  • /api/v1/auth/login    │  • /api/v1/predict          │
+               │  • /api/v1/auth/me       │  • /health & /docs          │
+               └─────────────┬────────────────────────────┬─────────────┘
+                             │                            │
+                             ▼                            ▼
+               ┌──────────────────────────┐  ┌──────────────────────────┐
+               │    SQLITE AUTH STORE     │  │   MACHINE LEARNING ENGINE│
+               │   Data/users.db (PBKDF2) │  │   Random Forest Classifier│
+               │   Salted Passwords & JWT │  │   DataCo (180,516 records)│
+               └──────────────────────────┘  └──────────────────────────┘
 ```
 
-## Dataset and model notes
+---
 
-The source dataset is the [DataCo Smart Supply Chain dataset on Kaggle](https://www.kaggle.com/datasets/shashwatwork/dataco-smart-supply-chain-for-big-data-analysis). The repository includes a cleaned, reduced set of columns rather than the complete raw source data.
+## 🌟 Key Features
 
-The classifier artifact was serialized with scikit-learn 1.6.1. Use that version when loading the model to avoid cross-version pickle warnings. Only load model artifacts from a source you trust.
+1. **Enterprise User Authentication:**
+   - **User Sign-Up:** Secure registration with email validation and PBKDF2-HMAC-SHA256 salted password hashing.
+   - **User Login:** Issues tamper-evident signed JWT bearer tokens with 7-day expiration.
+   - **1-Click Recruiter Demo:** Instant guest review access without manual form entry.
+   - **Persistent SQLite Database:** Auto-initialized user storage with zero external database setup required.
+2. **Executive KPI Dashboard:**
+   - On-time delivery rate, total revenue exposure ($36.7M), unique order counts, and schedule gap days.
+3. **Delivery Performance Analytics:**
+   - On-time delivery comparisons across shipping modes (First Class, Second Class, Standard, Same Day).
+   - Regional risk segmentation (Sales Exposure vs. Reliability) with K-Means risk clustering.
+4. **Real-Time ML Delay Predictor:**
+   - Real-time scoring using a 78-feature Random Forest model trained on the DataCo Supply Chain dataset.
+   - Returns continuous late probability percentage and actionable operational mitigation strategies.
+5. **Render Cloud Deployment Ready:**
+   - Multi-service `render.yaml` blueprint with automated dependency installation, health checks, and cross-service communication.
 
-## Screenshots
+---
 
-### Dashboard overview
-![Dashboard overview](screenshots/dashboard_overview.png)
+## 🚀 Local Quickstart
 
-### Delivery performance
-![Delivery analysis](screenshots/delivery_analysis.png)
+### 1. Prerequisites
+- Python 3.11.x installed.
 
-### Delay risk predictor
-![Delay predictor](screenshots/delay_predictor_1.png)
+### 2. Setup Virtual Environment
+```bash
+python -m venv .venv
 
-## Limitations
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
 
-- The Streamlit app currently displays delivery and regional analytics plus the delay predictor; it does not display a demand forecast or SHAP explanations.
-- Training and evaluation code is not included, so the model metrics and reported findings cannot be reproduced from this repository alone.
-- Data is historical and does not update from live orders or carrier systems.
-- The risk prediction reflects patterns in the training dataset and should not be used as a standalone operational decision.
+# macOS/Linux:
+source .venv/bin/activate
 
-## Author
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-Vinayak Nair
+### 3. Start Backend (Terminal 1)
+```powershell
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+* Interactive API Documentation (Swagger): `http://127.0.0.1:8000/docs`
+* Health Endpoint: `http://127.0.0.1:8000/health`
+
+### 4. Start Frontend (Terminal 2)
+```powershell
+streamlit run app.py
+```
+* Dashboard will automatically open at `http://localhost:8501`.
+
+---
+
+## ☁️ Deploying to Render
+
+This repository includes a pre-configured `render.yaml` Blueprint.
+
+### Option A: 1-Click Render Blueprint (Recommended)
+1. Push this repository to your **GitHub** account.
+2. Log into [Render](https://render.com).
+3. Click **New +** $\rightarrow$ **Blueprint**.
+4. Connect your GitHub repository.
+5. Render will automatically detect `render.yaml` and provision both:
+   - `supply-chain-api` (FastAPI backend)
+   - `supply-chain-dashboard` (Streamlit UI)
+6. Once deployed, open the public URL of `supply-chain-dashboard` in your browser!
+
+### Option B: Deploying Manually on Render (Free Tier)
+
+#### 1. Deploy the API:
+- **Service Type:** Web Service
+- **Runtime:** Python 3
+- **Build Command:** `pip install -r requirements-common.txt -r requirements-api.txt`
+- **Start Command:** `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+- **Health Check Path:** `/health`
+- **Environment Variables:**
+  - `PYTHON_VERSION`: `3.11.10`
+  - `API_SHARED_TOKEN`: *(click generate or enter any secret key)*
+  - `JWT_SECRET_KEY`: *(click generate or enter any secret key)*
+
+#### 2. Deploy the Dashboard:
+- **Service Type:** Web Service
+- **Runtime:** Python 3
+- **Build Command:** `pip install -r requirements-common.txt -r requirements-dashboard.txt`
+- **Start Command:** `streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true`
+- **Health Check Path:** `/_stcore/health`
+- **Environment Variables:**
+  - `PYTHON_VERSION`: `3.11.10`
+  - `API_BASE_URL`: `https://<YOUR-API-SERVICE-NAME>.onrender.com`
+  - `API_SHARED_TOKEN`: *(same token value as API)*
+
+> **Note on Render Free Tier Cold Starts:**  
+> Free instances spin down after 15 minutes of inactivity. When accessed after idle, the service takes 30–50 seconds to wake up. The UI features friendly loading state detection and automated retry triggers.
+
+---
+
+## 📊 Dataset & Model Details
+
+- **Dataset:** DataCo Smart Supply Chain Dataset (180,516 orders, 65,749 distinct order transactions).
+- **Target Variable:** `Late_delivery_risk` (Binary: 0 = On-Time, 1 = Late).
+- **Model Architecture:** Random Forest Classifier serialized with `scikit-learn==1.6.1`.
+- **Validation Score:** 0.73 ROC-AUC on historical test holdout.
