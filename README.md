@@ -19,6 +19,7 @@ The Streamlit server calls the API over Render's private network. The FastAPI se
 
 ## What it shows
 
+- A workspace navigation separates the executive overview, delivery performance, regional intelligence, and risk predictor into focused screens.
 - On-time delivery rate, total sales, unique orders, and average difference between actual and scheduled shipping days.
 - On-time performance by shipping mode and regional risk segments compared with sales exposure.
 - Order-level classification of the historical `Late_delivery_risk` target as 0 or 1, with the model's probability estimate.
