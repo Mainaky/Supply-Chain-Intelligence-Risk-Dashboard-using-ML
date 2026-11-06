@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
-import re
+import hmac
+import hashlib
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +29,7 @@ JWT_AUDIENCE = "supply-chain-dashboard"
 ACCESS_TOKEN_MINUTES = 30
 LOCAL_DB = Path(os.getenv("LOCAL_AUTH_DB_PATH", Path(__file__).resolve().parents[1] / "Data" / "auth_local.db"))
 PASSWORDS = PasswordHash.recommended()
+DUMMY_PASSWORD_HASH = PASSWORDS.hash("nonexistent-account-dummy-secret")
 
 
 class SignUpRequest(BaseModel):
@@ -122,6 +125,72 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )"""
         )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS auth_rate_limits (
+                bucket_key TEXT PRIMARY KEY,
+                window_start BIGINT NOT NULL,
+                attempts INTEGER NOT NULL,
+                blocked_until BIGINT NOT NULL DEFAULT 0
+            )"""
+        )
+
+
+def _rate_key(bucket: str, identity: str) -> str:
+    message = f"{bucket}:{identity.strip().lower()}".encode("utf-8")
+    return hmac.new(configured_jwt_secret().encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def enforce_rate_limit(
+    bucket: str,
+    identity: str,
+    *,
+    max_attempts: int,
+    window_seconds: int = 900,
+    block_seconds: int = 900,
+) -> None:
+    """Database-backed throttle keyed by HMAC so usernames and IPs aren't stored."""
+    now = int(time.time())
+    key = _rate_key(bucket, identity)
+    placeholders = "%s" if _database_url() else "?"
+    with database_connection() as connection:
+        row = connection.execute(
+            f"""INSERT INTO auth_rate_limits (bucket_key, window_start, attempts, blocked_until)
+            VALUES ({placeholders}, {placeholders}, 1, 0)
+            ON CONFLICT(bucket_key) DO UPDATE SET
+                window_start = CASE
+                    WHEN excluded.window_start - auth_rate_limits.window_start >= {int(window_seconds)}
+                    THEN excluded.window_start ELSE auth_rate_limits.window_start END,
+                attempts = CASE
+                    WHEN excluded.window_start - auth_rate_limits.window_start >= {int(window_seconds)}
+                    THEN 1 ELSE auth_rate_limits.attempts + 1 END,
+                blocked_until = CASE
+                    WHEN (CASE
+                        WHEN excluded.window_start - auth_rate_limits.window_start >= {int(window_seconds)}
+                        THEN 1 ELSE auth_rate_limits.attempts + 1 END) > {int(max_attempts)}
+                    THEN excluded.window_start + {int(block_seconds)} ELSE 0 END
+            RETURNING window_start, attempts, blocked_until""",
+            (key, now),
+        ).fetchone()
+        attempts = int(row["attempts"])
+        blocked_until = int(row["blocked_until"])
+        exceeded = attempts > max_attempts
+        retry_after = max(1, blocked_until - now) if blocked_until else block_seconds
+    if exceeded:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Wait before trying again.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def reset_rate_limit(bucket: str, identity: str) -> None:
+    key = _rate_key(bucket, identity)
+    placeholder = "%s" if _database_url() else "?"
+    with database_connection() as connection:
+        connection.execute(
+            f"DELETE FROM auth_rate_limits WHERE bucket_key = {placeholder}",
+            (key,),
+        )
 
 
 def _find_user(identifier: str) -> dict | None:
@@ -182,8 +251,8 @@ def register_user(request: SignUpRequest) -> AuthResponse:
 def authenticate_user(request: LoginRequest) -> AuthResponse:
     identifier = request.username.strip().lower()
     user = _find_user(identifier)
-    password_hash = user["password_hash"] if user else PASSWORDS.hash("nonexistent-account-dummy-secret")
-    verified, replacement_hash = PASSWORDS.verify_and_update(request.password, password_hash)
+    stored_hash = user["password_hash"] if user else DUMMY_PASSWORD_HASH
+    verified, replacement_hash = PASSWORDS.verify_and_update(request.password, stored_hash)
     if not user or not verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

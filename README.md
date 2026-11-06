@@ -15,7 +15,7 @@ Browser
                                   └── Render Postgres user store
 ```
 
-The Streamlit server calls the API over Render's private network. The browser does not call the model API directly. The API requires a signed bearer token for dashboard and prediction routes. Health checks are available at `/health`; interactive API docs are enabled locally and disabled on Render.
+The Streamlit server calls the API over Render's private network. The FastAPI service is configured as a private service, so it has no public URL; the browser does not call the model API directly. Dashboard and prediction routes require a signed bearer token. `/health` is available on the internal network; interactive API docs are enabled locally and disabled on Render.
 
 ## What it shows
 
@@ -71,7 +71,7 @@ Open `http://localhost:8501`. Local accounts use SQLite at the ignored `Data/aut
 2. `supply-chain-dashboard` runs Streamlit and receives the API's private hostname and port from Render.
 3. `supply-chain-users` stores account records using a managed database connection string.
 
-To deploy, connect the GitHub repository to **New → Blueprint** in Render, inspect the service/database plans and current charges, then apply the Blueprint. Render's free Postgres databases expire after 30 days and do not provide backups, so the Blueprint uses a paid persistent database. Review the costs in Render before applying; no Render service has been created by this repository change. Render Blueprints accept service/database references and health-check paths as configured here ([Blueprint reference](https://render.com/docs/blueprint-spec), [Postgres connections](https://render.com/docs/postgresql-creating-connecting)).
+To deploy, connect the GitHub repository to **New → Blueprint** in Render, inspect the service/database plans and current charges, then apply the Blueprint. The API is private and the dashboard connects to its internal hostname. Render's free Postgres databases expire after 30 days and do not provide backups, so the Blueprint uses a paid persistent database. Review the costs in Render before applying; no Render service has been created by this repository change. ([Blueprint reference](https://render.com/docs/blueprint-spec), [private services](https://render.com/docs/private-services), [Postgres connections](https://render.com/docs/postgresql-creating-connecting))
 
 ## Important files
 
@@ -101,7 +101,7 @@ render.yaml                  Render services, Postgres, secrets, and health chec
 
 ## Security and production boundary
 
-This version uses Argon2 password hashing, a required random JWT secret, issuer/audience/expiry/signature checks, input validation, and persistent Postgres on Render. Sign-up does not verify email ownership; there is no password reset, MFA, account administration, or formal distributed rate limiting. Add those controls and independent security review before using this as an operational system with real employees or sensitive data. The model itself is also not validated for current operational decisions.
+This version uses Argon2 password hashing, a required random JWT secret, issuer/audience/expiry/signature checks, input validation, database-backed signup/login throttles, and persistent Postgres on Render. Sign-up does not verify email ownership; there is no password reset, MFA, account administration, or edge-level abuse monitoring. Add those controls and independent security review before using this as an operational system with real employees or sensitive data. The model itself is also not validated for current operational decisions.
 
 ## Screenshots
 

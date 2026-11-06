@@ -21,8 +21,10 @@ from backend.auth import (
     SignUpRequest,
     authenticate_user,
     decode_token,
+    enforce_rate_limit,
     init_db,
     register_user,
+    reset_rate_limit,
 )
 
 
@@ -182,12 +184,22 @@ def health() -> dict[str, str]:
 
 @app.post("/api/v1/auth/signup", response_model=AuthResponse, status_code=201)
 def signup(request: SignUpRequest) -> AuthResponse:
+    enforce_rate_limit(
+        "signup-email",
+        str(request.email),
+        max_attempts=3,
+    )
+    enforce_rate_limit("signup-username", request.username, max_attempts=3)
     return register_user(request)
 
 
 @app.post("/api/v1/auth/login", response_model=AuthResponse)
 def login(request: LoginRequest) -> AuthResponse:
-    return authenticate_user(request)
+    identifier = request.username.strip().lower()
+    enforce_rate_limit("login-identity", identifier, max_attempts=5)
+    result = authenticate_user(request)
+    reset_rate_limit("login-identity", identifier)
+    return result
 
 
 @app.get("/api/v1/auth/me")

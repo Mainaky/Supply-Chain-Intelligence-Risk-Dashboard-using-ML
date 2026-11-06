@@ -57,7 +57,7 @@ def render_auth_page():
         <div style="text-align: center; margin-top: 20px; margin-bottom: 25px;">
             <h1 style="font-size: 2.4rem; font-weight: 700; color: #1E293B;">📦 Supply Chain Intelligence Console</h1>
             <p style="font-size: 1.1rem; color: #64748B;">
-                Production-grade delay prediction, delivery risk analytics, and global operations monitoring
+                Historical delivery analytics and machine-learning risk estimates
             </p>
         </div>
     """, unsafe_allow_html=True)
@@ -144,7 +144,7 @@ def fetch_dashboard(base_url: str, token: str) -> dict:
     response = requests.get(
         f"{base_url}/api/v1/dashboard",
         headers={"Authorization": f"Bearer {token}"},
-        timeout=(3.05, 25),
+        timeout=(30, 30),
     )
     response.raise_for_status()
     return response.json()
@@ -178,7 +178,7 @@ def render_dashboard():
         **About This Platform:**  
         • **Dataset:** 180,516 DataCo Orders  
         • **Model:** Random Forest (78 Features)  
-        • **Accuracy / ROC-AUC:** 0.73  
+        • **Reported ROC-AUC:** 0.73 (not independently reproduced)
         • **Target:** `Late_delivery_risk`
         """)
 
@@ -196,8 +196,7 @@ def render_dashboard():
     except requests.RequestException:
         st.error(
             "⚠️ The analytics backend service is not responding. "
-            "If deployed on Render (free tier), the web service may be waking from standby. "
-            "Please refresh in 30 seconds."
+            "Please retry in a moment."
         )
         if st.button("🔄 Retry Connection"):
             st.rerun()
@@ -212,7 +211,7 @@ def render_dashboard():
     col3.metric("Distinct Orders Analyzed", f"{kpis['unique_orders']:,}", help="Unique global purchase transactions evaluated")
     col4.metric("Avg. Schedule Gap", f"{kpis['average_schedule_gap_days']:+.2f} days", delta_color="inverse", help="Positive value denotes real shipping duration exceeded scheduled commitment")
 
-    st.caption(f"Evaluated on {kpis['dataset_rows']:,} verified order records.")
+    st.caption(f"Evaluated on {kpis['dataset_rows']:,} records in the packaged dataset.")
     st.divider()
 
     # ── Section 2: Visual Performance Analytics ───────────────────────────────
@@ -322,7 +321,7 @@ def render_dashboard():
                     f"{BASE_URL}/api/v1/predict",
                     json=payload,
                     headers={"Authorization": f"Bearer {active_token}"},
-                    timeout=(3.05, 30),
+                    timeout=(30, 30),
                 )
                 if response.status_code == 422:
                     st.error("Validation error: Invalid order parameter payload.")

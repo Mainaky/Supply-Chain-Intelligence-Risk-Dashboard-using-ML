@@ -1,5 +1,5 @@
 services:
-  - type: web
+  - type: pserv
     name: supply-chain-api
     runtime: python
     plan: starter
@@ -7,11 +7,12 @@ services:
     branch: main
     buildCommand: pip install -r requirements-common.txt -r requirements-api.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.10
+      - key: PORT
+        value: 10000
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
@@ -35,12 +36,12 @@ services:
       - key: API_HOST
         fromService:
           name: supply-chain-api
-          type: web
+          type: pserv
           property: host
       - key: API_PORT
         fromService:
           name: supply-chain-api
-          type: web
+          type: pserv
           property: port
 
 databases:
