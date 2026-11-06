@@ -286,7 +286,7 @@ def render_dashboard():
 
     # ── Section 4: Real-Time Delay Risk Predictor ──────────────────────────────
     st.subheader("🔮 Real-Time Order Delay Risk Predictor (ML Inference)")
-    st.write("Configure prospective order attributes to evaluate late-delivery risk using the production Random Forest classifier.")
+    st.write("Configure order attributes to estimate historical late-delivery risk with the packaged Random Forest classifier.")
 
     categories = dashboard["categories"]
     col_in1, col_in2, col_in3 = st.columns(3)
